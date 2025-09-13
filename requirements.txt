@@ -1,0 +1,5 @@
+aiohttp
+telethon
+beautifulsoup4
+cryptography
+fake-useragent
