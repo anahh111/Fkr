@@ -1,0 +1,143 @@
+name: FINAL UserBot
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   
+
+concurrency:
+  group: final-userbot
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 
+
+    steps:
+      - name: Checkout main code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev libssl-dev libjpeg-dev zlib1g-dev
+
+      - name: Download bot data from storage branch
+        run: |
+          echo "جاري تحميل البيانات من فرع التخزين..."
+          if git fetch origin bot-data-storage 2>/dev/null; then
+            echo "تم العثور على فرع التخزين"
+            git checkout origin/bot-data-storage -- . 2>/dev/null || echo "لا توجد بيانات سابقة"
+            echo "تم تحميل بيانات البوت بنجاح"
+          else
+            echo "لا يوجد فرع تخزين، سيبدأ البوت ببيانات جديدة"
+          fi
+          echo "الملفات بعد التحميل:"
+          ls -la *.py *.txt *.session 2>/dev/null || echo "لا توجد ملفات بيانات"
+          ls -la فلترة_اليوزرات/ 2>/dev/null || echo "لا يوجد مجلد فلترة"
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install telethon aiohttp beautifulsoup4 fake-useragent pillow
+
+      - name: Create necessary directories and files
+        run: |
+          mkdir -p sessions
+          mkdir -p فلترة_اليوزرات
+          
+          # إنشاء ملفات الفلترة إذا لم تكن موجودة
+          touch فلترة_اليوزرات/فلترة_banned.txt
+          touch فلترة_اليوزرات/فلترة_unknown.txt
+          touch فلترة_اليوزرات/فلترة_invalid.txt
+          
+          # إنشاء ملف الجلسة إذا لم يكن موجوداً
+          touch glshhhh || true
+          
+          echo "✅ تم إنشاء المجلدات والملفات اللازمة"
+
+      - name: Run bot
+        env:
+          PYTHONUNBUFFERED: 1
+        run: |
+          # تشغيل البوت مع إعادة تشغيل تلقائي في حالة الفشل
+          max_retries=5
+          retry_count=0
+          
+          while [ $retry_count -lt $max_retries ]; do
+            echo "▶️ تشغيل البوت (المحاولة $((retry_count+1))/$max_retries)"
+            python main.py
+            exit_code=$?
+            
+            if [ $exit_code -eq 0 ]; then
+              echo "✅ البوت انتهى بشكل طبيعي"
+              break
+            else
+              echo "⚠️ البوت توقف برمز خروج: $exit_code"
+              retry_count=$((retry_count+1))
+              
+              if [ $retry_count -lt $max_retries ]; then
+                echo "⏳ إعادة التشغيل خلال 10 ثواني..."
+                sleep 10
+              else
+                echo "❌ تم تجاوز الحد الأقصى للمحاولات"
+              fi
+            fi
+          done
+
+      - name: Save bot data to storage branch
+        if: always()
+        run: |
+          echo "💾 بدء حفظ بيانات البوت..."
+          
+          # الانتقال إلى الفرع الرئيسي أولاً
+          git checkout main
+          
+          # محاولة الانتقال إلى فرع التخزين أو إنشائه
+          git checkout bot-data-storage 2>/dev/null || git checkout -b bot-data-storage
+          
+          # حذف جميع الملفات القديمة
+          git rm -rf . 2>/dev/null || true
+          
+          # نسخ الملفات المهمة فقط
+          cp -r ../main/sessions/ . 2>/dev/null || echo "⚠️ لا توجد جلسات"
+          cp -r ../main/فلترة_اليوزرات/ . 2>/dev/null || echo "⚠️ لا يوجد مجلد فلترة"
+          cp ../main/glshhhh . 2>/dev/null || echo "⚠️ لا يوجد ملف جلسة"
+          cp ../main/main.py . 2>/dev/null || echo "⚠️ لا يوجد ملف رئيسي"
+          
+          # إضافة الملفات المهمة فقط
+          git add sessions/ فلترة_اليوزرات/ glshhhh main.py 2>/dev/null || true
+          
+          # عمل commit ورفعه
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          
+          if git diff --cached --quiet; then
+            echo "📝 لا توجد تغييرات للحفظ"
+          else
+            git commit -m "🤖 Auto-update bot data - $(date +'%Y-%m-%d %H:%M:%S')" 
+            git push origin bot-data-storage --force
+            echo "✅ تم حفظ البيانات بنجاح"
+          fi
+          
+          # العودة إلى الفرع الرئيسي
+          git checkout main
+
+      - name: Clean up and verify
+        run: |
+          echo "✅ تم الانتهاء من العملية بنجاح"
+          echo "📂 البيانات محفوظة في فرع: bot-data-storage"
+          echo "🕒 وقت التشغيل: $(date)"
